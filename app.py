@@ -3,22 +3,21 @@ import pandas as pd
 import plotly.express as px
 import yfinance as yf
 
-# 1. 페이지 설정 (다크 모드 테마 적용)
+# 1. 페이지 설정 및 다크 테마 적용
 st.set_page_config(layout="wide", page_title="PRO KOSPI Heatmap")
 
-# CSS를 이용한 강제 다크 모드 스타일링
 st.markdown("""
     <style>
-    .main { background-color: #121212; }
+    .main { background-color: #121212 !important; }
     header { background-color: #121212 !important; }
-    section[data-testid="stSidebar"] { background-color: #1e1e1e; }
-    .stMarkdown h1 { color: #ffffff; text-align: center; }
+    section[data-testid="stSidebar"] { background-color: #1e1e1e !important; }
+    .stMarkdown h1 { color: #ffffff !important; text-align: center; }
     </style>
     """, unsafe_allow_stdio=True)
 
 st.title("⬛ KOSPI MARKET HEATMAP (PRO)")
 
-# 2. 데이터 불러오기 (종목 코드 6자리 유지)
+# 2. 데이터 불러오기
 @st.cache_data
 def get_base_data():
     df = pd.read_csv("kospi_list.csv")
@@ -33,47 +32,42 @@ display_metric = st.sidebar.selectbox(
     "지표 선택 (Color & Label)",
     ["등락률", "PER", "PBR", "ROE", "배당수익률"]
 )
-# 이제 시가총액이 기본 크기 기준이 됩니다.
-count = st.sidebar.slider("표시 종목 수 (시총 상위순)", 10, len(base_df), 50)
+count = st.sidebar.slider("표시 종목 수 (시총 상위순)", 10, 100, 50)
 
-# 4. 데이터 수집 함수 (시가총액 포함)
+# 4. 데이터 수집 함수
 @st.cache_data(ttl=3600)
 def fetch_pro_data(df_base, limit):
     target_df = df_base.head(limit).copy()
     final_list = []
     
-    progress_bar = st.progress(0, text="Finviz 데이터 동기화 중...")
+    status = st.empty()
+    status.text("Finviz 데이터 동기화 중...")
 
-    for i, row in enumerate(target_df.itertuples()):
+    for row in target_df.itertuples():
         ticker_symbol = f"{row.Code}.KS"
         try:
             ticker = yf.Ticker(ticker_symbol)
             info = ticker.info
             
-            # 시가총액 (Market Cap) - 사각형 크기 결정용
             m_cap = info.get('marketCap', 0)
+            cur_p = info.get('currentPrice', 0)
+            prev_p = info.get('previousClose', 0)
+            change = ((cur_p - prev_p) / prev_p * 100) if prev_p else 0
             
-            # 가격 및 등락률
-            current_price = info.get('currentPrice', 0)
-            prev_close = info.get('previousClose', 0)
-            change = ((current_price - prev_close) / prev_close * 100) if prev_close else 0
-            
-            # 재무 지표 (N/A 값 처리 포함)
             per = info.get('forwardPE') or info.get('trailingPE') or 0
             pbr = info.get('priceToBook') or 0
             roe = (info.get('returnOnEquity') or 0) * 100
-            div = (info.get('dividendYield') or 0) * 100 # 백분율 환산
+            div = (info.get('dividendYield') or 0) * 100
             
             final_list.append({
                 '종목명': row.Name,
                 '섹터': row.Sector if pd.notna(row.Sector) else '기타',
                 '시가총액': m_cap,
                 '등락률': round(change, 2),
-                'PER': round(per, 2) if per != 0 else "N/A",
-                'PBR': round(pbr, 2) if pbr != 0 else "N/A",
+                'PER': round(per, 2) if per else "N/A",
+                'PBR': round(pbr, 2) if pbr else "N/A",
                 'ROE': f"{round(roe, 2)}%",
                 '배당수익률': f"{round(div, 2)}%",
-                # 시각화 수치용 (숫자형)
                 'val_ROE': roe,
                 'val_DIV': div,
                 'val_PER': per,
@@ -81,19 +75,17 @@ def fetch_pro_data(df_base, limit):
             })
         except:
             continue
-        progress_bar.progress((i + 1) / limit)
             
-    progress_bar.empty()
+    status.empty()
     return pd.DataFrame(final_list)
 
-# 5. 시각화 실행
 df = fetch_pro_data(base_df, count)
 
+# 5. 시각화 실행
 if not df.empty:
-    # 지표별 색상 및 데이터 맵핑
     metric_map = {
         "등락률": ("등락률", "RdYlGn", 0),
-        "PER": ("val_PER", "RdYlGn_r", df[df['val_PER']>0]['val_PER'].median() if not df.empty else 15),
+        "PER": ("val_PER", "RdYlGn_r", 15),
         "PBR": ("val_PBR", "RdYlGn_r", 1.0),
         "ROE": ("val_ROE", "Greens", None),
         "배당수익률": ("val_DIV", "Greens", None)
@@ -103,6 +95,20 @@ if not df.empty:
 
     fig = px.treemap(df, 
                      path=[px.Constant("KOSPI"), '섹터', '종목명'], 
-                     values='시가총액',  # 시가총액 가중평균 방식 적용
+                     values='시가총액', 
                      color=col_name,
-                     custom_data=['종목명', display_metric], # 실제 표시될 텍스트
+                     custom_data=['종목명', display_metric],
+                     color_continuous_scale=col_scale,
+                     color_continuous_midpoint=col_mid,
+                     template="plotly_dark",
+                     height=800)
+
+    fig.update_traces(
+        texttemplate="<b>%{customdata[0]}</b><br>%{customdata[1]}",
+        textposition="middle center",
+        hovertemplate="<b>%{label}</b><br>시가총액: %{value:,.0f}<br>지표: %{customdata[1]}"
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.error("데이터를 수집 중입니다. 잠시만 기다려주세요.")
