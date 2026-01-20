@@ -3,80 +3,97 @@ import pandas as pd
 import plotly.express as px
 import yfinance as yf
 
-# 1. 페이지 설정
-st.set_page_config(layout="wide", page_title="KOSPI Heatmap")
-st.title("🚀 KOSPI 전 종목 리얼 히트맵")
+# 1. 페이지 설정 및 제목
+st.set_page_config(layout="wide", page_title="PRO KOSPI Heatmap")
+st.title("📈 KOSPI 전문 가치평가 히트맵")
 
-# 2. 데이터 불러오기 함수
+# 2. 데이터 불러오기 (기존 CSV 활용)
 @st.cache_data
 def get_base_data():
     return pd.read_csv("kospi_list.csv", dtype={'Code': str})
 
-try:
-    base_df = get_base_data()
+base_df = get_base_data()
 
-    # 3. 사이드바 설정
-    st.sidebar.header("설정")
-    color_metric = st.sidebar.selectbox("색상 기준", ["등락률", "현재가"])
-    count = st.sidebar.slider("종목 수", 5, len(base_df), 20)
+# 3. 사이드바 - 다양한 옵션 추가 (Finviz 핵심 기능)
+st.sidebar.header("⚙️ 시각화 옵션")
 
-    # 4. 데이터 수집 (안정적인 개별 호출 방식)
-    def fetch_data(df_base, limit):
-        target_df = df_base.head(limit).copy()
-        final_list = []
-        
-        progress_text = "주식 시세를 가져오는 중입니다..."
-        my_bar = st.progress(0, text=progress_text)
+# 크기 기준 선택
+size_option = st.sidebar.selectbox(
+    "사각형 크기 기준 (Size)",
+    ["현재가", "등락률(절대값)"] # 나중에 시가총액 데이터를 넣으면 더 완벽해집니다.
+)
 
-        for i, row in enumerate(target_df.itertuples()):
-            ticker = row.Code + ".KS"
-            try:
-                s = yf.Ticker(ticker)
-                # fast_info를 사용하여 속도를 높입니다
-                hist = s.history(period="2d")
-                if len(hist) >= 2:
-                    current_price = hist['Close'].iloc[-1]
-                    prev_price = hist['Close'].iloc[-2]
-                    change = ((current_price - prev_price) / prev_price) * 100
-                else:
-                    current_price = 0
-                    change = 0
-                
-                final_list.append({
-                    '종목명': row.Name,
-                    '섹터': row.Sector if pd.notna(row.Sector) else '기타',
-                    '현재가': current_price,
-                    '등락률': change
-                })
-            except:
-                continue
-            my_bar.progress((i + 1) / limit)
-        
-        my_bar.empty()
-        return pd.DataFrame(final_list)
+# 색상 기준 선택
+color_option = st.sidebar.selectbox(
+    "색상 표시 지표 (Color)",
+    ["등락률", "PER", "PBR", "ROE"]
+)
 
-    if st.button('데이터 업데이트 시작'):
-        df = fetch_data(base_df, count)
-        
-        if not df.empty:
-            # 5. 히트맵 그리기 (사각형 크기를 등락률 절대값으로 설정)
-            df['abs_change'] = df['등락률'].abs() + 1 # 크기가 0이면 안되므로 +1
+count = st.sidebar.slider("분석 종목 수", 10, len(base_df), 30)
+
+# 4. 고급 데이터 수집 함수
+def fetch_pro_data(df_base, limit):
+    target_df = df_base.head(limit).copy()
+    final_list = []
+    my_bar = st.progress(0, text="데이터 분석 중...")
+
+    for i, row in enumerate(target_df.itertuples()):
+        ticker = row.Code + ".KS"
+        try:
+            s = yf.Ticker(ticker)
+            info = s.info # 상세 재무 지표를 가져옵니다.
             
-            fig = px.treemap(df, 
-                             path=[px.Constant("KOSPI"), '섹터', '종목명'], 
-                             values='abs_change', # 사각형 크기
-                             color='등락률',      # 색상 기준
-                             hover_data=['현재가', '등락률'],
-                             color_continuous_scale='RdYlGn',
-                             color_continuous_midpoint=0,
-                             height=700)
+            # 가격 데이터 (최근 2일치)
+            hist = s.history(period="2d")
+            change = 0
+            if len(hist) >= 2:
+                change = ((hist['Close'].iloc[-1] - hist['Close'].iloc[-2]) / hist['Close'].iloc[-2]) * 100
+            
+            final_list.append({
+                '종목명': row.Name,
+                '섹터': row.Sector if pd.notna(row.Sector) else '기타',
+                '현재가': info.get('currentPrice', 0),
+                '등락률': change,
+                'PER': info.get('forwardPE', 0),
+                'PBR': info.get('priceToBook', 0),
+                'ROE': info.get('returnOnEquity', 0) * 100 if info.get('returnOnEquity') else 0,
+                '등락률(절대값)': abs(change) + 1 # 크기용
+            })
+        except:
+            continue
+        my_bar.progress((i + 1) / limit)
+    
+    my_bar.empty()
+    return pd.DataFrame(final_list)
 
-            fig.update_traces(textinfo="label+value")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.warning("데이터를 가져오지 못했습니다. 잠시 후 다시 시도하세요.")
+# 5. 실행 및 출력
+if st.sidebar.button('📊 히트맵 업데이트'):
+    df = fetch_pro_data(base_df, count)
+    
+    if not df.empty:
+        # 지표에 따른 색상 스케일 설정
+        if color_option == "등락률":
+            scale = 'RdYlGn'
+            mid = 0
+        elif color_option == "ROE":
+            scale = 'Greens'
+            mid = None
+        else: # PER, PBR은 낮을수록 좋으므로 반전 스케일
+            scale = 'RdYlGn_r'
+            mid = df[color_option].median() # 중앙값을 기준으로 색상 분리
+
+        fig = px.treemap(df, 
+                         path=[px.Constant("KOSPI"), '섹터', '종목명'], 
+                         values=size_option, 
+                         color=color_option,
+                         hover_data=['현재가', '등락률', 'PER', 'PBR', 'ROE'],
+                         color_continuous_scale=scale,
+                         color_continuous_midpoint=mid,
+                         height=800)
+
+        fig.update_traces(textinfo="label+value")
+        st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("왼쪽에서 종목 수를 정하고 '데이터 업데이트 시작' 버튼을 눌러주세요!")
-
-except Exception as e:
-    st.error(f"오류가 발생했습니다: {e}")
+        st.error("데이터를 불러오지 못했습니다.")
+else:
+    st.info("왼쪽 사이드바에서 옵션을 정하고 [히트맵 업데이트]를 눌러주세요!")
