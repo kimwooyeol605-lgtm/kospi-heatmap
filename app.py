@@ -3,17 +3,11 @@ import pandas as pd
 import plotly.express as px
 import yfinance as yf
 
-# 1. 페이지 설정 및 다크 테마 적용
+# 1. 페이지 설정 및 다크 모드 강제 적용
 st.set_page_config(layout="wide", page_title="PRO KOSPI Heatmap")
 
-st.markdown("""
-    <style>
-    .main { background-color: #121212 !important; }
-    header { background-color: #121212 !important; }
-    section[data-testid="stSidebar"] { background-color: #1e1e1e !important; }
-    .stMarkdown h1 { color: #ffffff !important; text-align: center; }
-    </style>
-    """, unsafe_allow_stdio=True)
+# 에러가 났던 st.markdown 부분을 가장 안전한 방식으로 수정했습니다.
+st.markdown("<style>div.block-container{padding-top:2rem; background-color: #121212;}</style>", unsafe_allow_stdio=True)
 
 st.title("⬛ KOSPI MARKET HEATMAP (PRO)")
 
@@ -49,15 +43,19 @@ def fetch_pro_data(df_base, limit):
             ticker = yf.Ticker(ticker_symbol)
             info = ticker.info
             
+            # 시가총액 (사각형 크기 결정)
             m_cap = info.get('marketCap', 0)
+            
+            # 등락률 계산
             cur_p = info.get('currentPrice', 0)
             prev_p = info.get('previousClose', 0)
             change = ((cur_p - prev_p) / prev_p * 100) if prev_p else 0
             
+            # 재무 지표 및 백분율 처리
             per = info.get('forwardPE') or info.get('trailingPE') or 0
             pbr = info.get('priceToBook') or 0
-            roe = (info.get('returnOnEquity') or 0) * 100
-            div = (info.get('dividendYield') or 0) * 100
+            roe_val = (info.get('returnOnEquity') or 0) * 100
+            div_val = (info.get('dividendYield') or 0) * 100
             
             final_list.append({
                 '종목명': row.Name,
@@ -66,10 +64,10 @@ def fetch_pro_data(df_base, limit):
                 '등락률': round(change, 2),
                 'PER': round(per, 2) if per else "N/A",
                 'PBR': round(pbr, 2) if pbr else "N/A",
-                'ROE': f"{round(roe, 2)}%",
-                '배당수익률': f"{round(div, 2)}%",
-                'val_ROE': roe,
-                'val_DIV': div,
+                'ROE': f"{round(roe_val, 2)}%",
+                '배당수익률': f"{round(div_val, 2)}%",
+                'val_ROE': roe_val,
+                'val_DIV': div_val,
                 'val_PER': per,
                 'val_PBR': pbr
             })
@@ -83,19 +81,21 @@ df = fetch_pro_data(base_df, count)
 
 # 5. 시각화 실행
 if not df.empty:
-    metric_map = {
-        "등락률": ("등락률", "RdYlGn", 0),
-        "PER": ("val_PER", "RdYlGn_r", 15),
-        "PBR": ("val_PBR", "RdYlGn_r", 1.0),
-        "ROE": ("val_ROE", "Greens", None),
-        "배당수익률": ("val_DIV", "Greens", None)
-    }
-    
-    col_name, col_scale, col_mid = metric_map[display_metric]
+    # 지표별 색상 맵핑
+    if display_metric == "등락률":
+        col_name, col_scale, col_mid = "등락률", "RdYlGn", 0
+    elif display_metric == "PER":
+        col_name, col_scale, col_mid = "val_PER", "RdYlGn_r", 15
+    elif display_metric == "PBR":
+        col_name, col_scale, col_mid = "val_PBR", "RdYlGn_r", 1.0
+    elif display_metric == "ROE":
+        col_name, col_scale, col_mid = "val_ROE", "Greens", None
+    else: # 배당수익률
+        col_name, col_scale, col_mid = "val_DIV", "Greens", None
 
     fig = px.treemap(df, 
                      path=[px.Constant("KOSPI"), '섹터', '종목명'], 
-                     values='시가총액', 
+                     values='시가총액', # 시가총액 가중치 적용
                      color=col_name,
                      custom_data=['종목명', display_metric],
                      color_continuous_scale=col_scale,
@@ -105,10 +105,9 @@ if not df.empty:
 
     fig.update_traces(
         texttemplate="<b>%{customdata[0]}</b><br>%{customdata[1]}",
-        textposition="middle center",
-        hovertemplate="<b>%{label}</b><br>시가총액: %{value:,.0f}<br>지표: %{customdata[1]}"
+        textposition="middle center"
     )
 
     st.plotly_chart(fig, use_container_width=True)
 else:
-    st.error("데이터를 수집 중입니다. 잠시만 기다려주세요.")
+    st.error("데이터를 수집하는 중입니다. 잠시 후 새로고침 해주세요.")
