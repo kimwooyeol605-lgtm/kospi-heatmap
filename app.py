@@ -3,12 +3,10 @@ import pandas as pd
 import plotly.express as px
 import yfinance as yf
 
-# 1. 페이지 설정 및 다크 모드 강제 적용
-st.set_page_config(layout="wide", page_title="PRO KOSPI Heatmap")
+# 1. 페이지 설정 (가장 기본적이고 안전한 방식)
+st.set_page_config(layout="wide", page_title="KOSPI MARKET HEATMAP")
 
-# 에러가 났던 st.markdown 부분을 가장 안전한 방식으로 수정했습니다.
-st.markdown("<style>div.block-container{padding-top:2rem; background-color: #121212;}</style>", unsafe_allow_stdio=True)
-
+# 에러의 원인이었던 복잡한 CSS 대신 제목만 깔끔하게 표시합니다.
 st.title("⬛ KOSPI MARKET HEATMAP (PRO)")
 
 # 2. 데이터 불러오기
@@ -35,7 +33,7 @@ def fetch_pro_data(df_base, limit):
     final_list = []
     
     status = st.empty()
-    status.text("Finviz 데이터 동기화 중...")
+    status.text("데이터 동기화 중...")
 
     for row in target_df.itertuples():
         ticker_symbol = f"{row.Code}.KS"
@@ -43,15 +41,15 @@ def fetch_pro_data(df_base, limit):
             ticker = yf.Ticker(ticker_symbol)
             info = ticker.info
             
-            # 시가총액 (사각형 크기 결정)
+            # 시가총액 (사각형 크기 결정 - Finviz 방식)
             m_cap = info.get('marketCap', 0)
             
-            # 등락률 계산
+            # 가격 정보
             cur_p = info.get('currentPrice', 0)
             prev_p = info.get('previousClose', 0)
             change = ((cur_p - prev_p) / prev_p * 100) if prev_p else 0
             
-            # 재무 지표 및 백분율 처리
+            # 재무 지표 (N/A 처리 및 백분율 환산)
             per = info.get('forwardPE') or info.get('trailingPE') or 0
             pbr = info.get('priceToBook') or 0
             roe_val = (info.get('returnOnEquity') or 0) * 100
@@ -79,7 +77,7 @@ def fetch_pro_data(df_base, limit):
 
 df = fetch_pro_data(base_df, count)
 
-# 5. 시각화 실행
+# 5. 시각화 실행 (Plotly 자체 다크 테마 사용)
 if not df.empty:
     # 지표별 색상 맵핑
     if display_metric == "등락률":
@@ -95,12 +93,12 @@ if not df.empty:
 
     fig = px.treemap(df, 
                      path=[px.Constant("KOSPI"), '섹터', '종목명'], 
-                     values='시가총액', # 시가총액 가중치 적용
+                     values='시가총액', # 시가총액 크기 반영
                      color=col_name,
                      custom_data=['종목명', display_metric],
                      color_continuous_scale=col_scale,
                      color_continuous_midpoint=col_mid,
-                     template="plotly_dark",
+                     template="plotly_dark", # 안전한 다크 테마 적용
                      height=800)
 
     fig.update_traces(
